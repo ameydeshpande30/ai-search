@@ -23,8 +23,9 @@ A powerful desktop application for AI-powered search, built with modern web tech
 
 ## 📸 Screenshots
 
-<!-- Add screenshots here -->
-![Screenshot](https://via.placeholder.com/800x400?text=Application+Screenshot)
+![Screenshot 1](screenshots/Screenshot%202026-05-17%20at%207.36.21%20PM.png)
+
+![Screenshot 2](screenshots/Screenshot%202026-05-17%20at%207.36.36%20PM.png)
 
 ## 🚀 Getting Started
 
