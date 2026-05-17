@@ -1,5 +1,4 @@
 name: Build
-
 on:
   push:
     branches:
@@ -18,18 +17,17 @@ jobs:
         include:
           - os: macos-latest
             goarch: amd64
-
+            wails_platform: darwin/amd64   # ✅ Wails-compatible platform name
           - os: macos-latest
             goarch: arm64
-
+            wails_platform: darwin/arm64
           - os: ubuntu-latest
             goarch: amd64
-
+            wails_platform: linux/amd64
           - os: windows-latest
             goarch: amd64
-
+            wails_platform: windows/amd64
     runs-on: ${{ matrix.os }}
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -60,7 +58,7 @@ jobs:
         run: echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Build with Wails
-        run: wails build -platform ${{ matrix.os }}/${{ matrix.goarch }}
+        run: wails build -platform ${{ matrix.wails_platform }}  # ✅ Use the mapped name
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -74,9 +72,7 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
-
-    if: startsWith(github.ref, 'refs/tags/')
-
+    if: startsWith(github.ref, 'refs/tags/')  # only runs on tag pushes
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
