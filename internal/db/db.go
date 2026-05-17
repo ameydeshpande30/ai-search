@@ -206,3 +206,35 @@ func (db *DB) SeedMockData() error {
 	}
 	return nil
 }
+
+// QueryRaw executes a raw SELECT query and returns the matching SearchResults
+func (db *DB) QueryRaw(sqlStr string) ([]SearchResult, error) {
+	rows, err := db.conn.Query(sqlStr)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []SearchResult
+	for rows.Next() {
+		var path, filename, summary, tagsStr string
+		var id int
+		var lastModified int64
+
+		// SELECT * FROM documents yields: id, path, filename, summary, tags, last_modified
+		err = rows.Scan(&id, &path, &filename, &summary, &tagsStr, &lastModified)
+		if err != nil {
+			return nil, err
+		}
+
+		tags := strings.Split(tagsStr, ",")
+		results = append(results, SearchResult{
+			Path:     path,
+			Filename: filename,
+			Tags:     tags,
+			Summary:  summary,
+		})
+	}
+
+	return results, nil
+}

@@ -90,6 +90,25 @@ jobs:
           mkdir -p model
           curl -L -o model/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
 
+      - name: Pre-populate local llama-cli runtimes
+        shell: bash
+        run: |
+          mkdir -p model/bin/darwin-arm64
+          mkdir -p model/bin/windows-amd64
+
+          # 1. Download macOS arm64 llama-cli and libraries
+          curl -L -o macos.tar.gz https://github.com/ggml-org/llama.cpp/releases/download/b9198/llama-b9198-bin-macos-arm64.tar.gz
+          tar -zxf macos.tar.gz
+          cp -r llama-b9198/* model/bin/darwin-arm64/
+          rm -rf llama-b9198 macos.tar.gz
+
+          # 2. Download Windows llama-cli and libraries
+          curl -L -o win.zip https://github.com/ggml-org/llama.cpp/releases/download/b9198/llama-b9198-bin-win-cpu-x64.zip
+          unzip win.zip -d win_extracted
+          cp win_extracted/llama-cli.exe model/bin/windows-amd64/
+          cp win_extracted/*.dll model/bin/windows-amd64/ 2>/dev/null || true
+          rm -rf win_extracted win.zip
+
       - name: Add Go bin to PATH
         shell: bash
         run: echo "$(go env GOPATH)/bin" >> $GITHUB_PATH

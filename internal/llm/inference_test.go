@@ -137,3 +137,56 @@ func indexOf(s, substr string) int {
 	}
 	return -1
 }
+
+func TestBuildSQLPrompt(t *testing.T) {
+	prompt := BuildSQLPrompt("pdf from last week", 1715978400)
+	if prompt == "" {
+		t.Fatal("SQL Prompt should not be empty")
+	}
+
+	if !containsStr(prompt, "pdf from last week") {
+		t.Error("SQL Prompt should contain user query")
+	}
+
+	if !containsStr(prompt, "Table: documents") {
+		t.Error("SQL Prompt should explain table schema")
+	}
+
+	if !containsStr(prompt, "1715978400") {
+		t.Error("SQL Prompt should inject current timestamp")
+	}
+}
+
+func TestSanitizeSQLQuery(t *testing.T) {
+	// Valid SELECT queries
+	validQueries := []string{
+		"SELECT * FROM documents WHERE filename LIKE '%.pdf';",
+		"```sql\nSELECT * FROM documents WHERE last_modified >= 1700000000;\n```",
+		"   select * from documents   ",
+	}
+
+	for _, q := range validQueries {
+		sanitized, err := SanitizeSQLQuery(q)
+		if err != nil {
+			t.Errorf("Expected valid query to pass, got error: %v for %s", err, q)
+		}
+		if !containsStr(sanitized, "select") && !containsStr(sanitized, "SELECT") {
+			t.Errorf("Sanitized query should retain SELECT: %s", sanitized)
+		}
+	}
+
+	// Unsafe or invalid queries
+	invalidQueries := []string{
+		"DROP TABLE documents;",
+		"SELECT * FROM documents; DELETE FROM documents;",
+		"INSERT INTO documents VALUES (1, 'a.txt', 'b.txt', 'c', 'd', 0);",
+		"UPDATE documents SET tags = 'hack' WHERE id = 1;",
+	}
+
+	for _, q := range invalidQueries {
+		_, err := SanitizeSQLQuery(q)
+		if err == nil {
+			t.Errorf("Expected query to fail sanitization, but it passed: %s", q)
+		}
+	}
+}

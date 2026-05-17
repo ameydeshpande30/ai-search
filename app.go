@@ -5,12 +5,14 @@ import (
 	"embed"
 	"fmt"
 	"io"
+	"io/fs"
 	"local-ai-search/internal/db"
 	"local-ai-search/internal/llm"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -163,15 +165,81 @@ func (a *App) AISearch(query string) ([]llm.AISearchResult, error) {
 		return nil, fmt.Errorf("database not initialized")
 	}
 
-	// Get raw results from FTS
-	rawResults, err := a.db.Search(query)
-	if err != nil {
-		return nil, err
+	// 1. Try running GGUF Text-to-SQL
+	platform := runtime.Environment(a.ctx).Platform
+	cliName := "llama-cli"
+	if platform == "windows" {
+		cliName = "llama-cli.exe"
+	}
+	cliPath := filepath.Join(a.appDataDir, "bin", cliName)
+	modelPath := filepath.Join(a.appDataDir, "models", llm.ModelName)
+
+	var results []db.SearchResult
+	var err error
+	textToSqlSuccess := false
+
+	// Check if both model and cli binary exist
+	if _, errModel := os.Stat(modelPath); errModel == nil {
+		if _, errCli := os.Stat(cliPath); errCli == nil {
+			// Build Prompt
+			nowSecs := time.Now().Unix()
+			prompt := llm.BuildSQLPrompt(query, nowSecs)
+
+			// Execute llama-cli with GPU offloading enabled
+			cmd := exec.Command(cliPath,
+				"-m", modelPath,
+				"-p", prompt,
+				"-n", "64",
+				"--temp", "0.1",
+				"-ngl", "99",
+				"--log-disable",
+			)
+
+			outputBytes, errRun := cmd.Output()
+			if errRun == nil {
+				outputStr := string(outputBytes)
+				// Extract generated assistant response after '<|assistant|>'
+				idx := strings.LastIndex(outputStr, "<|assistant|>")
+				var generatedSQL string
+				if idx != -1 {
+					generatedSQL = outputStr[idx+len("<|assistant|>"):]
+				} else {
+					generatedSQL = outputStr
+				}
+				
+				// Re-extract since the tag is exactly "<|assistant|>\n"
+				idxAssistantNL := strings.LastIndex(outputStr, "<|assistant|>\n")
+				if idxAssistantNL != -1 {
+					generatedSQL = outputStr[idxAssistantNL+len("<|assistant|>\n"):]
+				}
+
+				sanitizedSQL, errSanitize := llm.SanitizeSQLQuery(generatedSQL)
+				if errSanitize == nil {
+					// Query SQLite
+					results, err = a.db.QueryRaw(sanitizedSQL)
+					if err == nil {
+						textToSqlSuccess = true
+					}
+				} else {
+					fmt.Printf("SQL Sanitization failed: %v, raw output: %s\n", errSanitize, generatedSQL)
+				}
+			} else {
+				fmt.Printf("llama-cli execution failed: %v\n", errRun)
+			}
+		}
 	}
 
-	// Convert to AISearchResult
+	// 2. Fallback to standard FTS search if Text-to-SQL failed or wasn't run
+	if !textToSqlSuccess {
+		results, err = a.db.Search(query)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// 3. Post-process: Convert to AISearchResult and run Go Smart Reranker
 	var aiResults []llm.AISearchResult
-	for _, r := range rawResults {
+	for _, r := range results {
 		aiResults = append(aiResults, llm.AISearchResult{
 			Path:     r.Path,
 			Filename: r.Filename,
@@ -179,9 +247,7 @@ func (a *App) AISearch(query string) ([]llm.AISearchResult, error) {
 		})
 	}
 
-	// Run the smart reranker (instant, no LLM needed)
 	reranked := llm.SmartRerank(query, aiResults)
-
 	return reranked, nil
 }
 
@@ -213,7 +279,7 @@ func (a *App) OpenFolder(path string) error {
 	return cmd.Start()
 }
 
-// DownloadLLM extracts the embedded GGUF model to the local app data folder and emits progress
+// DownloadLLM extracts the embedded GGUF model and the appropriate llama-cli runtimes locally
 func (a *App) DownloadLLM() (string, error) {
 	modelsDir := filepath.Join(a.appDataDir, "models")
 	if err := os.MkdirAll(modelsDir, 0755); err != nil {
@@ -227,6 +293,34 @@ func (a *App) DownloadLLM() (string, error) {
 
 	// Check if already extracted and complete
 	if info, err := os.Stat(modelPath); err == nil && info.Size() == modelSize {
+		// Run platform-specific runtime extraction check
+		platform := runtime.Environment(a.ctx).Platform
+		binDir := filepath.Join(a.appDataDir, "bin")
+		cliName := "llama-cli"
+		if platform == "windows" {
+			cliName = "llama-cli.exe"
+		}
+		cliPath := filepath.Join(binDir, cliName)
+		
+		// If cli binary doesn't exist, extract it!
+		if _, errCli := os.Stat(cliPath); errCli != nil {
+			srcDir := ""
+			if platform == "darwin" {
+				srcDir = "model/bin/darwin-arm64"
+			} else if platform == "windows" {
+				srcDir = "model/bin/windows-amd64"
+			}
+
+			if srcDir != "" {
+				runtime.EventsEmit(a.ctx, "llm-download-start", "Extracting local AI engine runtimes...")
+				err = a.extractEmbedDir(srcDir, binDir)
+				if err != nil {
+					runtime.EventsEmit(a.ctx, "llm-download-error", fmt.Sprintf("failed to extract AI engine: %v", err))
+					return "", err
+				}
+			}
+		}
+
 		runtime.EventsEmit(a.ctx, "llm-download-complete", modelPath)
 		return modelPath, nil
 	}
@@ -287,8 +381,76 @@ func (a *App) DownloadLLM() (string, error) {
 		return "", err
 	}
 
+	// Extract platform-specific llama-cli binaries
+	platform := runtime.Environment(a.ctx).Platform
+	binDir := filepath.Join(a.appDataDir, "bin")
+
+	srcDir := ""
+	if platform == "darwin" {
+		srcDir = "model/bin/darwin-arm64"
+	} else if platform == "windows" {
+		srcDir = "model/bin/windows-amd64"
+	}
+
+	if srcDir != "" {
+		runtime.EventsEmit(a.ctx, "llm-download-start", "Extracting local AI engine runtimes...")
+		err = a.extractEmbedDir(srcDir, binDir)
+		if err != nil {
+			runtime.EventsEmit(a.ctx, "llm-download-error", fmt.Sprintf("failed to extract AI engine: %v", err))
+			return "", err
+		}
+	}
+
 	runtime.EventsEmit(a.ctx, "llm-download-complete", modelPath)
 	return modelPath, nil
+}
+
+// extractEmbedDir extracts a directory from the embedded filesystem recursively
+func (a *App) extractEmbedDir(srcDir, destDir string) error {
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return err
+	}
+
+	return fs.WalkDir(a.modelFS, srcDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Get relative path from srcDir
+		relPath, err := filepath.Rel(srcDir, path)
+		if err != nil {
+			return err
+		}
+
+		if relPath == "." {
+			return nil
+		}
+
+		targetPath := filepath.Join(destDir, relPath)
+
+		if d.IsDir() {
+			return os.MkdirAll(targetPath, 0755)
+		}
+
+		// Read embedded file
+		data, err := a.modelFS.ReadFile(path)
+		if err != nil {
+			return err
+		}
+
+		// Write target file with 0755 permissions for binaries
+		err = os.WriteFile(targetPath, data, 0755)
+		if err != nil {
+			return err
+		}
+
+		// On macOS, strip Gatekeeper quarantine flags so they run silently
+		if runtime.Environment(a.ctx).Platform == "darwin" {
+			exec.Command("xattr", "-d", "com.apple.quarantine", targetPath).Run()
+		}
+
+		return nil
+	})
 }
 
 // GetSettings gets settings (mock for now)

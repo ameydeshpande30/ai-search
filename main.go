@@ -11,7 +11,7 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-//go:embed model/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+//go:embed model/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf all:model/bin
 var modelFS embed.FS
 
 func main() {

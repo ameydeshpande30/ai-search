@@ -242,3 +242,63 @@ func generateReason(query string, result AISearchResult, queryWords []string) st
 
 	return strings.Join(reasons, " · ")
 }
+
+// BuildSQLPrompt builds the SQLite text-to-SQL GGUF prompt.
+func BuildSQLPrompt(query string, now int64) string {
+	var sb strings.Builder
+	sb.WriteString("<|system|>\n")
+	sb.WriteString("You are a highly precise SQLite assistant.\n")
+	sb.WriteString("Translate the user's natural language file search query into a valid, single SQLite SELECT query.\n\n")
+	sb.WriteString("DATABASE SCHEMA:\n")
+	sb.WriteString("Table: documents\n")
+	sb.WriteString("Columns:\n")
+	sb.WriteString("- path (TEXT)\n")
+	sb.WriteString("- filename (TEXT)\n")
+	sb.WriteString("- summary (TEXT)\n")
+	sb.WriteString("- tags (TEXT)\n")
+	sb.WriteString("- last_modified (INTEGER, unix timestamp in seconds)\n\n")
+	sb.WriteString(fmt.Sprintf("CURRENT UNIX TIMESTAMP: %d (May 18, 2026)\n\n", now))
+	sb.WriteString("RULES:\n")
+	sb.WriteString("- Output ONLY the single SQLite SELECT statement starting with 'SELECT * FROM documents'.\n")
+	sb.WriteString("- Never include any explanations, conversation, or markdown code blocks (like ```sql).\n")
+	sb.WriteString("- Use LIKE wildcards for file extensions or keyword matching (e.g. filename LIKE '%.pdf').\n")
+	sb.WriteString("- For date/time arithmetic, compare 'last_modified' with appropriate math from the CURRENT UNIX TIMESTAMP.\n")
+	sb.WriteString("</s>\n<|user|>\n")
+	sb.WriteString(fmt.Sprintf("Query: \"%s\"\n", query))
+	sb.WriteString("</s>\n<|assistant|>\n")
+	return sb.String()
+}
+
+// SanitizeSQLQuery ensures the generated SQL query is a valid read-only SELECT statement.
+func SanitizeSQLQuery(sqlStr string) (string, error) {
+	// Clean markdown block wrappers if LLM returned them
+	sqlStr = strings.TrimSpace(sqlStr)
+	sqlStr = strings.TrimPrefix(sqlStr, "```sql")
+	sqlStr = strings.TrimPrefix(sqlStr, "```")
+	sqlStr = strings.TrimSuffix(sqlStr, "```")
+	sqlStr = strings.TrimSpace(sqlStr)
+
+	// Strip trailing semicolon if present
+	sqlStr = strings.TrimSuffix(sqlStr, ";")
+
+	sqlLower := strings.ToLower(sqlStr)
+
+	// Security validation: Must ONLY be a SELECT query
+	if !strings.HasPrefix(sqlLower, "select") {
+		return "", fmt.Errorf("unsafe or invalid query: must start with SELECT")
+	}
+
+	// Prevent SQL injection / modification queries
+	dangerKeywords := []string{
+		"insert", "update", "delete", "drop", "alter", "create", "replace",
+		"truncate", "grant", "revoke", "exec", "union", "attach", "detach",
+	}
+
+	for _, keyword := range dangerKeywords {
+		if strings.Contains(sqlLower, " "+keyword+" ") || strings.Contains(sqlLower, ";"+keyword) || strings.HasPrefix(sqlLower, keyword) {
+			return "", fmt.Errorf("security violation: query contains dangerous keyword '%s'", keyword)
+		}
+	}
+
+	return sqlStr + ";", nil
+}
