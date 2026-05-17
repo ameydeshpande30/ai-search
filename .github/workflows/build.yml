@@ -10,6 +10,9 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
@@ -20,18 +23,22 @@ jobs:
             goarch: amd64
             wails_platform: darwin/amd64
             artifact_name: ai-search-macos-amd64
+            llama_asset: "macos-x64"
           - os: macos-latest
             goarch: arm64
             wails_platform: darwin/arm64
             artifact_name: ai-search-macos-arm64
+            llama_asset: "macos-arm64"
           - os: ubuntu-latest
             goarch: amd64
             wails_platform: linux/amd64
             artifact_name: ai-search-linux-amd64
+            llama_asset: "ubuntu-x64"
           - os: windows-latest
             goarch: amd64
             wails_platform: windows/amd64
             artifact_name: ai-search-windows-amd64
+            llama_asset: "win-avx2-x64"
 
     runs-on: ${{ matrix.os }}
 
@@ -81,17 +88,80 @@ jobs:
       - name: Build with Wails
         run: wails build -platform ${{ matrix.wails_platform }}
 
+      # ── Download & bundle llama-server ──────────────────────────────
+
+      - name: Get latest llama.cpp release tag
+        id: llama_tag
+        shell: bash
+        run: |
+          TAG=$(curl -s https://api.github.com/repos/ggml-org/llama.cpp/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Download llama-server (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          TAG=${{ steps.llama_tag.outputs.tag }}
+          curl -L "https://github.com/ggml-org/llama.cpp/releases/download/${TAG}/llama-${TAG}-bin-ubuntu-x64.zip" -o llama.zip
+          unzip -j llama.zip "*/llama-server" -d build/bin/
+          chmod +x build/bin/llama-server
+
+      - name: Download llama-server (macOS)
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          TAG=${{ steps.llama_tag.outputs.tag }}
+          curl -L "https://github.com/ggml-org/llama.cpp/releases/download/${TAG}/llama-${TAG}-bin-${{ matrix.llama_asset }}.zip" -o llama.zip
+          unzip -j llama.zip "*/llama-server" -d build/bin/
+          chmod +x build/bin/llama-server
+
+      - name: Download llama-server (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $TAG = "${{ steps.llama_tag.outputs.tag }}"
+          Invoke-WebRequest -Uri "https://github.com/ggml-org/llama.cpp/releases/download/$TAG/llama-$TAG-bin-win-avx2-x64.zip" -OutFile llama.zip
+          Expand-Archive -Path llama.zip -DestinationPath llama_tmp
+          $server = Get-ChildItem -Path llama_tmp -Recurse -Filter "llama-server.exe" | Select-Object -First 1
+          Copy-Item $server.FullName -Destination build/bin/llama-server.exe
+
+      # ── Download & cache the GGUF model ─────────────────────────────
+
+      - name: Cache GGUF model
+        id: cache_model
+        uses: actions/cache@v4
+        with:
+          path: model.gguf
+          key: gguf-qwen2.5-0.5b-q4
+
+      - name: Download GGUF model
+        if: steps.cache_model.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          curl -L \
+            "https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf" \
+            -o model.gguf
+
+      - name: Copy model into build
+        shell: bash
+        run: cp model.gguf build/bin/model.gguf
+
+      # ── Package artifacts ────────────────────────────────────────────
+
       - name: Package Windows artifact
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist
-          Compress-Archive -Path build/bin/*.exe -DestinationPath dist/${{ matrix.artifact_name }}.zip
+          Compress-Archive -Path build/bin/* -DestinationPath dist/${{ matrix.artifact_name }}.zip
 
       - name: Package macOS artifact
         if: matrix.os == 'macos-latest'
         run: |
           mkdir -p dist
+          APP=$(ls build/bin/*.app | head -1)
+          cp build/bin/llama-server "$APP/Contents/MacOS/"
+          cp build/bin/model.gguf "$APP/Contents/MacOS/"
           cd build/bin
           zip -r ../../dist/${{ matrix.artifact_name }}.zip *.app
 
