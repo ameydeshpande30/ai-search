@@ -13,7 +13,6 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
         include:
           - os: macos-latest
             goarch: amd64
@@ -23,13 +22,6 @@ jobs:
             goarch: amd64
           - os: windows-latest
             goarch: amd64
-        exclude:
-          - os: macos-latest
-            goarch: arm64
-          - os: ubuntu-latest
-            goarch: arm64
-          - os: windows-latest
-            goarch: arm64
 
     runs-on: ${{ matrix.os }}
 
