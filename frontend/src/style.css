@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    @apply bg-[#0a0a0f] text-zinc-100 antialiased overflow-hidden;
+  }
+}
+
+#app {
+  @apply h-screen w-screen flex flex-col;
+}
+
+/* Custom scrollbar */
+.scrollbar-hide::-webkit-scrollbar { width: 4px; }
+.scrollbar-hide::-webkit-scrollbar-track { background: transparent; }
+.scrollbar-hide::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+.scrollbar-hide::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+
+/* Glow effects */
+.search-glow {
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.15),
+              0 4px 32px -4px rgba(99, 102, 241, 0.1),
+              0 24px 48px -8px rgba(0, 0, 0, 0.4);
+}
+.search-glow:focus-within {
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.4),
+              0 4px 32px -4px rgba(99, 102, 241, 0.25),
+              0 24px 48px -8px rgba(0, 0, 0, 0.5);
+}
+
+/* Card hover */
+.result-card {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.result-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.3);
+}
+
+/* Fade-in animation */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-up {
+  animation: fadeUp 0.35s ease-out both;
+}
+
+/* Pulse ring */
+@keyframes pulseRing {
+  0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.4); }
+  70% { box-shadow: 0 0 0 6px rgba(52, 211, 153, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+}
+.pulse-ring { animation: pulseRing 2s infinite; }
