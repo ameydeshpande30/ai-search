@@ -77,12 +77,15 @@ func SmartRerank(query string, results []AISearchResult) []AISearchResult {
 		pathLower := strings.ToLower(results[i].Path)
 		filenameLower := strings.ToLower(results[i].Filename)
 		summaryLower := strings.ToLower(results[i].Summary)
-		pathParts := strings.Split(pathLower, string(filepath.Separator))
+
+		// Normalize to forward slashes for cross-platform consistency
+		pathNormalized := filepath.ToSlash(pathLower)
+		pathParts := strings.Split(pathNormalized, "/")
 
 		// 1. PENALTY: Known junk directory in path
 		isJunk := false
 		for _, junkDir := range junkDirPatterns {
-			if strings.Contains(pathLower, "/"+junkDir+"/") || strings.Contains(pathLower, "\\"+junkDir+"\\") {
+			if strings.Contains(pathNormalized, "/"+junkDir+"/") {
 				score -= 100
 				isJunk = true
 				break
@@ -129,7 +132,7 @@ func SmartRerank(query string, results []AISearchResult) []AISearchResult {
 		// 6. BOOST: Query word appears in the path (user's own directory structure)
 		for _, word := range queryWords {
 			// Only count path segments, not the filename again
-			dirPath := strings.ToLower(filepath.Dir(results[i].Path))
+			dirPath := strings.ToLower(filepath.ToSlash(filepath.Dir(results[i].Path)))
 			if strings.Contains(dirPath, word) {
 				score += 10
 			}
@@ -144,7 +147,7 @@ func SmartRerank(query string, results []AISearchResult) []AISearchResult {
 		}
 
 		// 8. PENALTY: Very deep nesting (likely dependency/system file)
-		depth := strings.Count(results[i].Path, string(filepath.Separator))
+		depth := strings.Count(filepath.ToSlash(results[i].Path), "/")
 		if depth > 6 {
 			score -= float64(depth-6) * 3
 		}

@@ -177,6 +177,12 @@ func joinTags(tags []string) string {
 	return strings.Join(tags, ",")
 }
 
+// ClearAll deletes all documents and index rows
+func (db *DB) ClearAll() error {
+	_, err := db.conn.Exec("DELETE FROM documents; DELETE FROM fts_index;")
+	return err
+}
+
 // SeedMockData adds some mock data to the database for testing
 func (db *DB) SeedMockData() error {
 	mockDocs := []struct {

@@ -5,6 +5,8 @@ import {db} from '../models';
 
 export function AISearch(arg1:string):Promise<Array<llm.AISearchResult>>;
 
+export function ClearDatabase():Promise<void>;
+
 export function DownloadLLM():Promise<string>;
 
 export function GetSettings():Promise<Record<string, any>>;

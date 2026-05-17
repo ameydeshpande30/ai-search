@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Search as SearchIcon, Settings2, FileText, Folder, HardDrive, EyeOff, Download, Activity, Check, Sparkles, Zap, Brain } from 'lucide-react';
-import { DownloadLLM, GetSettings, Search, AISearch, OpenFile, OpenFolder } from '../wailsjs/go/main/App';
+import { DownloadLLM, GetSettings, Search, AISearch, OpenFile, OpenFolder, ClearDatabase } from '../wailsjs/go/main/App';
 import { EventsOn } from '../wailsjs/runtime/runtime';
 
 export default function App() {
@@ -9,6 +9,7 @@ export default function App() {
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(true);
   const [isDownloaded, setIsDownloaded] = useState(false);
+  const [platform, setPlatform] = useState('darwin');
 
   useEffect(() => {
     EventsOn("llm-download-progress", (data: any) => {
@@ -25,6 +26,13 @@ export default function App() {
       setIsDownloading(false);
     });
     DownloadLLM().catch(console.error);
+
+    // Fetch settings to check platform
+    GetSettings().then((settings: any) => {
+      if (settings && settings.platform) {
+        setPlatform(settings.platform);
+      }
+    }).catch(console.error);
   }, []);
 
   return (
@@ -68,22 +76,38 @@ export default function App() {
 
       {/* Content */}
       <div className="flex-1 overflow-hidden relative">
-        {activeTab === 'search' ? <SearchView /> : <SettingsView isDownloading={isDownloading} isDownloaded={isDownloaded} downloadProgress={downloadProgress} />}
+        {activeTab === 'search' ? <SearchView platform={platform} /> : <SettingsView isDownloading={isDownloading} isDownloaded={isDownloaded} downloadProgress={downloadProgress} />}
       </div>
     </div>
   );
 }
 
-function SearchView() {
+function SearchView({ platform }: { platform: string }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<any[]>([]);
   const [aiResults, setAiResults] = useState<any[]>([]);
   const [phase2Loading, setPhase2Loading] = useState(false);
+  
   const [isIndexing, setIsIndexing] = useState(false);
+  const [indexedCount, setIndexedCount] = useState(0);
+  const [currentFile, setCurrentFile] = useState('');
 
   useEffect(() => {
-    EventsOn("index-start", () => setIsIndexing(true));
-    EventsOn("index-complete", () => setIsIndexing(false));
+    EventsOn("index-start", () => {
+      setIsIndexing(true);
+      setIndexedCount(0);
+      setCurrentFile('');
+    });
+    EventsOn("index-progress", (data: any) => {
+      setIsIndexing(true);
+      setIndexedCount(data.count);
+      setCurrentFile(data.current);
+    });
+    EventsOn("index-complete", (count: any) => {
+      setIsIndexing(false);
+      setIndexedCount(Number(count) || 0);
+      setCurrentFile('');
+    });
   }, []);
 
   useEffect(() => {
@@ -125,14 +149,16 @@ function SearchView() {
           autoFocus
         />
         
-        <div className="absolute inset-y-0 right-0 flex items-center pr-5 gap-2">
+        <div className="absolute inset-y-0 right-0 flex items-center pr-5 gap-3.5">
           {phase2Loading && (
             <div className="w-4 h-4 border-2 border-indigo-500/40 border-t-indigo-400 rounded-full animate-spin" />
           )}
           {isIndexing && !phase2Loading && (
-            <div className="flex items-center gap-1.5 text-emerald-500/70">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-[10px] font-medium uppercase tracking-wider">Indexing</span>
+            <div className="flex items-center gap-2 text-emerald-500/80 bg-emerald-500/[0.04] border border-emerald-500/10 px-2.5 py-1 rounded-lg">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping shrink-0" />
+              <span className="text-[10px] font-medium uppercase tracking-wider">
+                Scanning...
+              </span>
             </div>
           )}
         </div>
@@ -162,6 +188,7 @@ function SearchView() {
                         match={r.summary?.length > 120 ? r.summary.substring(0, 120) + "…" : r.summary} 
                         onClick={() => OpenFile(r.path)}
                         onOpenFolder={(e: any) => { e.stopPropagation(); OpenFolder(r.path); }}
+                        platform={platform}
                       />
                     </div>
                   ))
@@ -205,6 +232,7 @@ function SearchView() {
                           aiMatch={r.aiReason || 'Semantically relevant'}
                           onClick={() => OpenFile(r.path)}
                           onOpenFolder={(e: any) => { e.stopPropagation(); OpenFolder(r.path); }}
+                          platform={platform}
                         />
                       </div>
                     ))}
@@ -230,9 +258,17 @@ function SearchView() {
             <p className="text-lg font-light text-zinc-500">Search your files with AI</p>
             <p className="text-xs text-zinc-700 mt-2">Type to search instantly · AI reranks results automatically</p>
             {isIndexing && (
-              <div className="mt-6 flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/5 border border-emerald-500/10">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 pulse-ring" />
-                <span className="text-[10px] text-emerald-500/70 font-medium uppercase tracking-wider">Indexing your files</span>
+              <div className="mt-6 flex flex-col items-center gap-1.5 px-4 py-3 rounded-2xl bg-emerald-500/[0.02] border border-emerald-500/10 w-80 shadow-lg shadow-emerald-950/20">
+                <div className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse pulse-ring" />
+                  <span className="text-[10px] text-emerald-400 font-semibold uppercase tracking-wider">Indexing Active</span>
+                </div>
+                {currentFile && (
+                  <p className="text-[11px] text-zinc-500 truncate max-w-full text-center px-2">
+                    Reading: <span className="text-zinc-300 font-mono">{currentFile}</span>
+                  </p>
+                )}
+                <p className="text-[11px] text-emerald-500/70 font-medium">{indexedCount} files cataloged</p>
               </div>
             )}
           </div>
@@ -242,8 +278,15 @@ function SearchView() {
   );
 }
 
-function ResultItem({ title, path, tag, icon, match, aiMatch, onClick, onOpenFolder, variant }: any) {
+function ResultItem({ title, path, tag, icon, match, aiMatch, onClick, onOpenFolder, variant, platform }: any) {
   const isAi = variant === 'ai';
+  
+  const getFolderTooltip = () => {
+    if (platform === 'windows') return 'Show in Explorer';
+    if (platform === 'darwin') return 'Show in Finder';
+    return 'Show in File Manager';
+  };
+
   return (
     <div 
       onClick={onClick}
@@ -282,7 +325,7 @@ function ResultItem({ title, path, tag, icon, match, aiMatch, onClick, onOpenFol
       {onOpenFolder && (
         <button 
           onClick={onOpenFolder}
-          title="Show in Finder"
+          title={getFolderTooltip()}
           className="absolute right-3 top-3 p-1.5 rounded-lg text-zinc-600 hover:text-zinc-200 hover:bg-white/[0.06] opacity-0 group-hover:opacity-100 transition-all"
         >
           <Folder className="w-3.5 h-3.5" />
@@ -293,6 +336,24 @@ function ResultItem({ title, path, tag, icon, match, aiMatch, onClick, onOpenFol
 }
 
 function SettingsView({ isDownloading, isDownloaded, downloadProgress }: any) {
+  const [isClearing, setIsClearing] = useState(false);
+  const [isCleared, setIsCleared] = useState(false);
+
+  const handleClearDb = async () => {
+    if (confirm('Are you sure you want to clear the entire search database? This will remove all indexed files.')) {
+      setIsClearing(true);
+      try {
+        await ClearDatabase();
+        setIsCleared(true);
+        setTimeout(() => setIsCleared(false), 3000);
+      } catch (err) {
+        console.error('Failed to clear database:', err);
+      } finally {
+        setIsClearing(false);
+      }
+    }
+  };
+
   return (
     <div className="h-full flex flex-col p-8 w-full max-w-3xl mx-auto overflow-y-auto scrollbar-hide">
       <h1 className="text-xl font-semibold text-zinc-100 mb-8 flex items-center gap-3">
@@ -333,6 +394,30 @@ function SettingsView({ isDownloading, isDownloaded, downloadProgress }: any) {
                   placeholder="E.g. Skip financial records..."
                 />
               </div>
+            </div>
+          </div>
+        </section>
+        
+        {/* Database Management */}
+        <section className="space-y-3">
+          <h2 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-[0.15em]">Database Management</h2>
+          <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-5 flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-medium text-sm text-zinc-200">Clear Search Database</h3>
+                <p className="text-[11px] text-zinc-600 mt-1">Remove all indexed files and start with a clean search catalog.</p>
+              </div>
+              <button 
+                onClick={handleClearDb}
+                disabled={isClearing}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold tracking-wide transition-all border
+                  ${isCleared 
+                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
+                    : 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20 active:scale-95'
+                  }`}
+              >
+                {isClearing ? 'Clearing...' : isCleared ? 'Cleared ✓' : 'Clear Database'}
+              </button>
             </div>
           </div>
         </section>

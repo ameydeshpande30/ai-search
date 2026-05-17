@@ -65,6 +65,7 @@ func (a *App) ScanDirectory(dirPath string) error {
 
 	runtime.EventsEmit(a.ctx, "index-start")
 	
+	indexedCount := 0
 	filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
@@ -119,12 +120,29 @@ func (a *App) ScanDirectory(dirPath string) error {
 			
 			// Index it
 			a.db.AddDocument(path, info.Name(), summary, []string{"Auto-Indexed"}, info.ModTime().Unix())
+			indexedCount++
+
+			// Emit progress every 5 files or on the first file
+			if indexedCount%5 == 0 || indexedCount == 1 {
+				runtime.EventsEmit(a.ctx, "index-progress", map[string]interface{}{
+					"count":   indexedCount,
+					"current": info.Name(),
+				})
+			}
 		}
 		return nil
 	})
 	
-	runtime.EventsEmit(a.ctx, "index-complete")
+	runtime.EventsEmit(a.ctx, "index-complete", indexedCount)
 	return nil
+}
+
+// ClearDatabase empties the database completely
+func (a *App) ClearDatabase() error {
+	if a.db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	return a.db.ClearAll()
 }
 
 // Search performs a query across the indexed documents
@@ -165,12 +183,30 @@ func (a *App) AISearch(query string) ([]llm.AISearchResult, error) {
 
 // OpenFile opens a file in the default OS application
 func (a *App) OpenFile(path string) error {
-	return exec.Command("open", path).Start()
+	var cmd *exec.Cmd
+	switch os := runtime.Environment(a.ctx).Platform; os {
+	case "darwin":
+		cmd = exec.Command("open", path)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", path)
+	default: // linux
+		cmd = exec.Command("xdg-open", path)
+	}
+	return cmd.Start()
 }
 
-// OpenFolder opens the directory containing the file in Finder
+// OpenFolder opens the directory containing the file in the default file manager
 func (a *App) OpenFolder(path string) error {
-	return exec.Command("open", "-R", path).Start()
+	var cmd *exec.Cmd
+	switch os := runtime.Environment(a.ctx).Platform; os {
+	case "darwin":
+		cmd = exec.Command("open", "-R", path)
+	case "windows":
+		cmd = exec.Command("explorer", "/select,"+filepath.Clean(path))
+	default: // linux
+		cmd = exec.Command("xdg-open", filepath.Dir(path))
+	}
+	return cmd.Start()
 }
 
 // DownloadLLM starts downloading the LLM and emits progress events
@@ -194,6 +230,7 @@ func (a *App) DownloadLLM() (string, error) {
 func (a *App) GetSettings() map[string]interface{} {
 	return map[string]interface{}{
 		"model_path": filepath.Join(a.appDataDir, "models", llm.ModelName),
+		"platform":   runtime.Environment(a.ctx).Platform,
 	}
 }
 

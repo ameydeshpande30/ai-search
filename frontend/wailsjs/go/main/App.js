@@ -6,6 +6,10 @@ export function AISearch(arg1) {
   return window['go']['main']['App']['AISearch'](arg1);
 }
 
+export function ClearDatabase() {
+  return window['go']['main']['App']['ClearDatabase']();
+}
+
 export function DownloadLLM() {
   return window['go']['main']['App']['DownloadLLM']();
 }
