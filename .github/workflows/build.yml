@@ -1,5 +1,4 @@
 name: Build
-
 on:
   push:
     branches:
@@ -14,19 +13,25 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: macos-latest
             goarch: amd64
-
+            wails_platform: darwin/amd64
+            artifact_name: ai-search-macos-amd64
           - os: macos-latest
             goarch: arm64
-
+            wails_platform: darwin/arm64
+            artifact_name: ai-search-macos-arm64
           - os: ubuntu-latest
             goarch: amd64
-
+            wails_platform: linux/amd64
+            artifact_name: ai-search-linux-amd64
           - os: windows-latest
             goarch: amd64
+            wails_platform: windows/amd64
+            artifact_name: ai-search-windows-amd64
 
     runs-on: ${{ matrix.os }}
 
@@ -47,6 +52,17 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.0-dev \
+            libglib2.0-dev \
+            pkg-config \
+            build-essential
+
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
@@ -60,23 +76,42 @@ jobs:
         run: echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Build with Wails
-        run: wails build -platform ${{ matrix.os }}/${{ matrix.goarch }}
+        run: wails build -platform ${{ matrix.wails_platform }}
 
-      - name: Upload artifacts
+      # --- Package artifacts nicely ---
+
+      - name: Package Windows artifact
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Compress-Archive -Path build/bin/*.exe -DestinationPath dist/${{ matrix.artifact_name }}.zip
+
+      - name: Package macOS artifact
+        if: matrix.os == 'macos-latest'
+        run: |
+          mkdir -p dist
+          cd build/bin
+          zip -r ../../dist/${{ matrix.artifact_name }}.zip *.app
+
+      - name: Package Linux artifact
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          mkdir -p dist
+          cd build/bin
+          tar -czf ../../dist/${{ matrix.artifact_name }}.tar.gz *
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: neuron-search-${{ matrix.os }}-${{ matrix.goarch }}
-          path: |
-            build/bin/*
-            !build/bin/*.dSYM
+          name: ${{ matrix.artifact_name }}
+          path: dist/*
           retention-days: 30
 
   release:
     needs: build
     runs-on: ubuntu-latest
-
     if: startsWith(github.ref, 'refs/tags/')
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
