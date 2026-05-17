@@ -10,6 +10,12 @@ A powerful desktop application for AI-powered search, built with modern web tech
 
 </div>
 
+## 📸 Screenshots
+
+![Screenshot 1](screenshots/screenshot1.png)
+
+![Screenshot 2](screenshots/screenshot2.png)
+
 ---
 
 ## ✨ Features
@@ -20,12 +26,6 @@ A powerful desktop application for AI-powered search, built with modern web tech
 - 💻 **Cross-Platform** - Works on Windows, macOS, and Linux
 - 🔄 **Hot Reload** - Instant feedback during development
 - 🛠️ **Type-Safe** - Full TypeScript support for reliable code
-
-## 📸 Screenshots
-
-![Screenshot 1](screenshots/screenshot1.png)
-
-![Screenshot 2](screenshots/screenshot2.png)
 
 ## 🚀 Getting Started
 
