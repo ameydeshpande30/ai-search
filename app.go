@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"embed"
 	"fmt"
+	"io"
 	"local-ai-search/internal/db"
 	"local-ai-search/internal/llm"
 	"os"
@@ -18,10 +20,11 @@ type App struct {
 	ctx        context.Context
 	appDataDir string
 	db         *db.DB
+	modelFS    embed.FS
 }
 
 // NewApp creates a new App application struct
-func NewApp() *App {
+func NewApp(modelFS embed.FS) *App {
 	// Setup app data dir
 	homeDir, _ := os.UserHomeDir()
 	appDataDir := filepath.Join(homeDir, ".local-ai-search")
@@ -41,6 +44,7 @@ func NewApp() *App {
 	return &App{
 		appDataDir: appDataDir,
 		db:         database,
+		modelFS:    modelFS,
 	}
 }
 
@@ -209,16 +213,77 @@ func (a *App) OpenFolder(path string) error {
 	return cmd.Start()
 }
 
-// DownloadLLM starts downloading the LLM and emits progress events
+// DownloadLLM extracts the embedded GGUF model to the local app data folder and emits progress
 func (a *App) DownloadLLM() (string, error) {
-	runtime.EventsEmit(a.ctx, "llm-download-start", "Starting download...")
-	
-	modelPath, err := llm.DownloadModel(a.ctx, a.appDataDir, func(p llm.DownloadProgress) {
-		runtime.EventsEmit(a.ctx, "llm-download-progress", p)
-	})
+	modelsDir := filepath.Join(a.appDataDir, "models")
+	if err := os.MkdirAll(modelsDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create models directory: %w", err)
+	}
 
+	modelPath := filepath.Join(modelsDir, llm.ModelName)
+
+	// 668788096 bytes is the exact size of the model
+	const modelSize = int64(668788096)
+
+	// Check if already extracted and complete
+	if info, err := os.Stat(modelPath); err == nil && info.Size() == modelSize {
+		runtime.EventsEmit(a.ctx, "llm-download-complete", modelPath)
+		return modelPath, nil
+	}
+
+	runtime.EventsEmit(a.ctx, "llm-download-start", "Extracting local model...")
+
+	// Open the embedded file
+	embedFile, err := a.modelFS.Open("model/" + llm.ModelName)
 	if err != nil {
-		runtime.EventsEmit(a.ctx, "llm-download-error", err.Error())
+		runtime.EventsEmit(a.ctx, "llm-download-error", fmt.Sprintf("failed to open embedded model: %v", err))
+		return "", err
+	}
+	defer embedFile.Close()
+
+	// Create temporary target file
+	tmpPath := modelPath + ".tmp"
+	out, err := os.Create(tmpPath)
+	if err != nil {
+		runtime.EventsEmit(a.ctx, "llm-download-error", fmt.Sprintf("failed to create temp file: %v", err))
+		return "", err
+	}
+	defer out.Close()
+
+	// Extract in chunks and emit progress
+	buf := make([]byte, 1024*1024) // 1MB buffer
+	var totalWritten int64
+
+	for {
+		n, readErr := embedFile.Read(buf)
+		if n > 0 {
+			_, writeErr := out.Write(buf[:n])
+			if writeErr != nil {
+				runtime.EventsEmit(a.ctx, "llm-download-error", fmt.Sprintf("failed to write temp file: %v", writeErr))
+				return "", writeErr
+			}
+			totalWritten += int64(n)
+			
+			percent := int((float64(totalWritten) / float64(modelSize)) * 100)
+			runtime.EventsEmit(a.ctx, "llm-download-progress", map[string]interface{}{
+				"Total":      uint64(modelSize),
+				"Downloaded": uint64(totalWritten),
+				"Percentage": percent,
+			})
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			runtime.EventsEmit(a.ctx, "llm-download-error", fmt.Sprintf("failed to read embedded model: %v", readErr))
+			return "", readErr
+		}
+	}
+
+	out.Close() // Close before renaming
+
+	if err := os.Rename(tmpPath, modelPath); err != nil {
+		runtime.EventsEmit(a.ctx, "llm-download-error", fmt.Sprintf("failed to finalize model: %v", err))
 		return "", err
 	}
 

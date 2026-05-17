@@ -11,9 +11,12 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed model/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+var modelFS embed.FS
+
 func main() {
 	// Create an instance of the app structure
-	app := NewApp()
+	app := NewApp(modelFS)
 
 	// Create application with options
 	err := wails.Run(&options.App{
