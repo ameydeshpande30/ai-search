@@ -86,6 +86,10 @@ wails build -platform darwin/amd64
 
 For detailed configuration options, see the [Wails project configuration documentation](https://wails.io/docs/reference/project-config).
 
+## 📖 Documentation
+
+To understand the core design, full-text virtual tables, automatic synchronization triggers, and the Smart Heuristic AI Reranking rules, check out our [Architecture Blueprint](file:///Users/ameyd/Documents/codes/ai-sarch-app/docs/architecture.md).
+
 ## 📁 Project Structure
 
 ```
